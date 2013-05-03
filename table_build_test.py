@@ -45,13 +45,28 @@ tb = TableBuilder(
 			KEY `short_code` (`short_code`)
 		)
 		""",
-		destination_table = 'Meet_greet_test',
+		output_table = 'Meet_greet_test',
 		verbose = True
 )
 
-tb.add_source('short_codes', 'ecom', "SELECT id, short_code FROM property_unit WHERE short_code IS NOT NULL", join_on=2, outer_join=True, keep_key_column=True)
-tb.add_source('greeter_info', 'ecom', "SELECT id, CONCAT(first_name, ' ', last_name) AS greeter_name, email AS greeter_email FROM auth_user", join_on=6, outer_join=True, keep_key_column=True)
+#tb.add_source('short_codes', 'ecom', "SELECT id, short_code FROM property_unit WHERE short_code IS NOT NULL", join_on=2, outer_join=True, keep_key_column=True)
+#tb.add_source('greeter_info', 'ecom', "SELECT id, CONCAT(first_name, ' ', last_name) AS greeter_name, email AS greeter_email FROM auth_user", join_on=6, outer_join=True, keep_key_column=True)
 
-tb.join()
-tb.write(rebuild=True)
-tb.reporting()
+#tb.join()
+#tb.write(rebuild=True)
+#tb.reporting()
+
+tb.quick_join(
+	short_codes = {
+		'db': 'ecom',
+		'query': "SELECT id, short_code FROM property_unit WHERE short_code IS NOT NULL",
+		'join_on': 2,
+		'keep_key_column':True
+	},
+	greeter_info = {
+		'db': 'ecom',
+		'query': "SELECT id, CONCAT(first_name, ' ', last_name) AS greeter_name, email AS greeter_email FROM auth_user",
+		'join_on': 6,
+		'keep_key_column':True
+	}
+)

@@ -4,19 +4,46 @@
 This library allows you to get data from various SQL databases, "join" them together within
 your Pyhon script, and write the result into your own database.
 
-Usage :
-	tb = TableBuilder(
-		main_db = 'platform',
-		main_query = "SELECT ...",
-		destination_table = 'Your_table',
-		verbose = True
-	)
-	tb.build()
-	tb.add_source('my_source1', 'ecom', "SELECT id, ...", join_on=2, outer_join=True, keep_key_column=True)
-	tb.add_source('my_source2', 'platform', "SELECT id, ...", join_on=6, outer_join=True, keep_key_column=True)
-	tb.join()
-	tb.write()
-	tb.reporting()
+
+High-level usage :
+	> from python_join import TableBuilder
+	> 
+	> tb = TableBuilder(
+	> 	main_db = 'platform',
+	> 	main_query = "SELECT ...",
+	> 	output_table = 'Your_table',
+	> 	verbose = True
+	> )
+	> tb.quick_join(
+	> 	my_source1 = {
+	> 		'db': 'ecom',
+	> 		'query': 'SELECT id, ...',
+	> 		'join_on': 2
+	> 	},
+	> 	my_source2 = {
+	> 		'db': 'platform',
+	> 		'query': "SELECT id, ...",
+	> 		'join_on': 6,
+	> 		'outer_join':True,
+	> 		'keep_key_column':True
+	> 	}
+	> )
+
+Low-level usage :
+	> from python_join import TableBuilder
+	> 
+	> tb = TableBuilder(
+	> 	main_db = 'platform',
+	> 	main_query = "SELECT ...",
+	> 	output_table = 'Your_table',
+	> 	verbose = True
+	> )
+	> tb.build()
+	> tb.add_source('my_source1', 'ecom', "SELECT id, ...", join_on=2
+	> tb.add_source('my_source2', 'platform', "SELECT id, ...", join_on=6, outer_join=True, keep_key_column=True)
+	> tb.join()
+	> tb.write()
+	> tb.reporting()
 
 In this example, we will :
 - download the mail data using 'main_query',
@@ -44,14 +71,14 @@ class TableBuilder(object):
 	
 	"""
 	
-	def __init__(self, main_db, main_query, create_query, destination_table, verbose=False, destination_db='datawarehouse'):
+	def __init__(self, main_db, main_query, create_query, output_table, verbose=False, output_db='datawarehouse'):
 		self.sources = {}
 		self.sources_ordered = []
-		self.destination_table = destination_table
+		self.output_table = output_table
 		self.create_query = create_query
 		self.verbose = verbose
 		self.result = []
-		self.destination_db = destination_db
+		self.output_db = output_db
 		self.start_time = start_time = datetime.now()
 		
 		self.main_source = {
@@ -63,14 +90,14 @@ class TableBuilder(object):
 	
 	def _rebuild_sql(self):
 		"""
-		Drops and rebuilds the destination table
+		Drops and rebuilds the output table
 		
 		"""
 		if self.verbose:
-			print "... (Re)-creating the destination table ..."
+			print "... (Re)-creating the output table ..."
 			
-		with DB(self.destination_db) as dw:
-			query1 = "DROP TABLE IF EXISTS `"+self.destination_table+"`"
+		with DB(self.output_db) as dw:
+			query1 = "DROP TABLE IF EXISTS `"+self.output_table+"`"
 			query2 = self.create_query
 			dw.execute(query1)
 			dw.execute(query2)
@@ -102,7 +129,7 @@ class TableBuilder(object):
 				'errors':[],
 				'data':None
 			}
-			
+
 		self._get_data(name)
 		
 	def _get_data(self, source_name):
@@ -218,7 +245,7 @@ class TableBuilder(object):
 		
 	def write(self, rebuild=True):
 		"""
-		Writes the content of 'self.result' into the SQL destination table
+		Writes the content of 'self.result' into the SQL output table
 		
 		"""
 		if rebuild:
@@ -227,8 +254,8 @@ class TableBuilder(object):
 		if self.verbose:
 			print "... Writing the data into the datawarehouse ..."
 
-		with DB(self.destination_db) as dw:
-			query = "REPLACE INTO "+self.destination_table+" VALUES (" + ",".join(["%s"] * len(self.result[0])) + ")"
+		with DB(self.output_db) as dw:
+			query = "REPLACE INTO "+self.output_table+" VALUES (" + ",".join(["%s"] * len(self.result[0])) + ")" 
 			dw.execute(query, values=self.result, many=True)
 	
 	def reporting(self):
@@ -252,3 +279,32 @@ class TableBuilder(object):
 		print ""
 		print "(Execution started at : %s)" % self.start_time
 		print "(Execution time : %s)" % (datetime.now()-self.start_time)
+	
+	def quick_join(self, **kwargs):
+		"""
+		High-level function to use the library (takes a list of sources) : gets the data, performs the join and writes the output
+		
+		Example :
+			> self.quick_join(
+				[{
+					'name':'...',
+					'db':'...',
+					'query':'...',
+					'join_on':'...'
+				},
+				{
+					'name':'...',
+					'db':'...',
+					'query':'...',
+					'join_on':'...',
+					'outer_join':True,
+					'keep_key_column':True
+				}
+				]
+			)
+		"""
+		for s_name,s in kwargs.items():
+			self.add_source(name=s_name, **s)
+		self.join()
+		self.write(rebuild=True)
+		self.reporting()
