@@ -39,6 +39,11 @@ class SourceAlreadyExistsError(Exception):
 
 		
 class TableBuilder(object):
+	"""
+	The main object you have to instanciate to join tables.
+	
+	"""
+	
 	def __init__(self, main_db, main_query, create_query, destination_table, verbose=False, destination_db='datawarehouse'):
 		self.sources = {}
 		self.sources_ordered = []
@@ -56,7 +61,14 @@ class TableBuilder(object):
 		}
 		self._get_data(None)
 	
-	def build(self):
+	def _rebuild_sql(self):
+		"""
+		Drops and rebuilds the destination table
+		
+		"""
+		if self.verbose:
+			print "... (Re)-creating the destination table ..."
+			
 		with DB(self.destination_db) as dw:
 			query1 = "DROP TABLE IF EXISTS `"+self.destination_table+"`"
 			query2 = self.create_query
@@ -64,6 +76,18 @@ class TableBuilder(object):
 			dw.execute(query2)
 	
 	def add_source(self, name, db, query, join_on, outer_join=False, keep_key_column=False):
+		"""
+		Adds a secondary source to the dictionary ('self.sources')
+		
+		- outer_join :		If True, all the rows of the main source will be kept, even if several of them doesn't match any row in this source
+		
+		- join_on :			The index of the column (in the main source) on which you want to join this source (starting at 0)
+							Thus, the 'join_on'-th column of the main source will be joined on the first (index 0) column of this source
+							
+		- keep_key_column :	If True, the column (in the main source) on which you join will appear in the final result
+		
+		"""
+		
 		if name in self.sources or name=='main':
 			raise SourceAlreadyExistsError(name)
 		else :
@@ -82,6 +106,13 @@ class TableBuilder(object):
 		self._get_data(name)
 		
 	def _get_data(self, source_name):
+		"""
+		Gets the data from a source and stores it
+		
+		'source_name' should be either the name provided in 'add_source()' or None to get
+		data from the main source
+		
+		"""
 		if self.verbose:
 			print "... Getting data from '%s' source ..." % (source_name or 'main')
 		
@@ -99,16 +130,52 @@ class TableBuilder(object):
 				self.sources[source_name]['data'] = self._get_dictionary(data)
 	
 	def _get_dictionary(self, data):
+		"""
+		Given a list of tuples, returns a dictionary where :
+		- the key is the first element of each tuple
+		- the value is the tuple without its first value
+		
+		Example :
+			> self._get_dictionary([('a','b','c'),('x','y','z'),('u','v','w')]
+			{'a':('b','c'), 'x':('y','z'), 'u':('v','w')}
+		
+		"""
 		dict = {}
 		for e in data:
 			dict[e[0]]=e[1:]
 		return dict
 	
 	def _get_sources_order(self):
+		"""
+		Returns a list of all the sources names ordered by 'join_on' field
+		
+		"""
 		fields = {self.sources[s]['join_on']:s for s in self.sources}
 		self.sources_ordered = [fields[e] for e in sorted(fields)]
 	
 	def _append_result_row(self, row, matches):
+		"""
+		Given a row (of the main source) and the dictionary of the matches for each source,
+		returns the final joined row
+		
+		Example :
+		> self.sources
+		{
+			'codes':{
+				join_on: 1,
+				'keep_key_column':False,
+				...
+			}
+			'people':{
+				join_on: 3,
+				keep_key_column:True,
+				...
+			}
+		}
+		> self._append_result_row((5,1258,'note',6,2013), {'codes':('ABCD','London'), 'people':('John',)})
+		[5,'ABCD','London','note',6,'John',2013]
+		
+		"""
 		result_row = []
 		curs = 0
 		
@@ -124,6 +191,11 @@ class TableBuilder(object):
 			self.result.append(result_row)
 		
 	def join(self):
+		"""
+		Joins all the secondary sources to the main source
+		(and stores the result in 'self.result')
+		
+		"""
 		matches = None
 		self._get_sources_order()
 		
@@ -144,21 +216,39 @@ class TableBuilder(object):
 			
 			self._append_result_row(row, matches)
 		
-	def write(self):
+	def write(self, rebuild=True):
+		"""
+		Writes the content of 'self.result' into the SQL destination table
+		
+		"""
+		if rebuild:
+			self._rebuild_sql()
+			
 		if self.verbose:
 			print "... Writing the data into the datawarehouse ..."
-			
+
 		with DB(self.destination_db) as dw:
 			query = "REPLACE INTO "+self.destination_table+" VALUES (" + ",".join(["%s"] * len(self.result[0])) + ")"
 			dw.execute(query, values=self.result, many=True)
 	
 	def reporting(self):
+		"""
+		For reporting purposes - shows the results of the script
+		
+		- 'rows' :		The total number of rows in the given source
+		- 'matches' :	The number of rows of the main source that match a row in the given source
+		- 'errors' :	The number of rows of the main source that doesn't match any row in the given source
+						In the verbose mode, displays the list of the keys (from the main source) that doesn't match
+		
+		"""
+		print ""
 		print "- Main source (from '%s') :	%s rows" % (self.main_source['db'], len(self.main_source['data']))
 		
 		for s_name,s in self.sources.items():
 			print ""
 			print "- Source '%s' :		%s rows	%s matches	%s errors" % (s_name, len(s['data']), s['matches_count'], s['errors_count'])
 			if self.verbose and s['errors_count']>0:
-				print "		* Errors : " + ("	".join(map(str, s['errors'])))
+				print "	* Keys not found : " + ("	".join(map(lambda x: '"'+str(x)+'"'	, s['errors'])))
 		print ""
-		print "(Execution time : %s)" % (datetime.now()-self.start_time);
+		print "(Execution started at : %s)" % self.start_time
+		print "(Execution time : %s)" % (datetime.now()-self.start_time)
